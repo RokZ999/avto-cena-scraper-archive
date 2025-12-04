@@ -1,5 +1,7 @@
 # Car Scraper Application
 
+Subpart of this repo -> [https://github.com/RokZ999/avto-cena](https://github.com/RokZ999/avto-cena)
+
 > **⚠️ DISCLAIMER:** This project is archived and likely no longer functional. The target websites (avto.net and doberavto.si) have probably updated their anti-scraping measures, changed their HTML structure, or implemented new protections since this code was written. This repository is provided for educational and reference purposes only.
 
 A Python application that scrapes car listings from Slovenian automotive websites (avto.net and doberavto.si) and stores the data in MongoDB.
