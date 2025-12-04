@@ -1,0 +1,57 @@
+# This method of processing is no longer used as a better approach has been found.
+# It is retained in the codebase for potential future utility.
+
+import asyncio
+import os
+import re
+import shutil
+from typing import List
+
+from Backend.scraper.utils.async_processor import collect_any_raw_htmls
+from Backend.scraper.utils.decorators import time_it
+from Backend.scraper.utils.lxml_processor import get_files_paths_from_directory, extract_text_from_html
+
+# XPATHS
+CARS_XPATH = "//th[contains(., 'VIN / številka šasije:')]/following-sibling::td"
+# SYSTEM PATHS
+EVERY_CAR_DIR = "every_car"
+# CONSTANTS
+NUM_OF_WINDOWS = 12
+
+
+@time_it
+def every_car_urls_processor(async_driver, direct_car_urls) -> List[str]:
+    if os.path.exists(EVERY_CAR_DIR):
+        shutil.rmtree(EVERY_CAR_DIR)
+    os.makedirs(EVERY_CAR_DIR, exist_ok=True)
+
+    div, mod = divmod(len(direct_car_urls), 1000)
+    for i in range(div):
+        asyncio.run(every_car_async(async_driver, direct_car_urls[i * 1000: (i + 1) * 1000]))
+    asyncio.run(every_car_async(async_driver, direct_car_urls[div * 1000: div * 1000 + mod]))
+
+    vins = get_all_vins()
+    with open("vins.txt", "w") as file:
+        for vin in vins:
+            file.write(vin + "\n")
+
+
+async def every_car_async(async_driver, direct_car_urls) -> List[str]:
+    await collect_any_raw_htmls(async_driver, direct_car_urls, NUM_OF_WINDOWS, EVERY_CAR_DIR, avto_net_callback)
+    await async_driver.quit()
+
+
+def avto_net_callback(page_url: str) -> tuple:
+    """Specific callback function for avto.net URL processing."""
+    pattern = r"id=(\d+)"
+    match = re.search(pattern, page_url)
+    if match:
+        return match.group(1)
+    else:
+        raise ValueError("ID not found in URL")
+
+
+def get_all_vins() -> List[str]:
+    files_paths = get_files_paths_from_directory(EVERY_CAR_DIR)
+    vin = extract_text_from_html(files_paths, CARS_XPATH)
+    return vin

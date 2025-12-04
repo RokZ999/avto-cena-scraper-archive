@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.11.0/.schema/devbox.schema.json",
+  "packages": [
+    "python@3.12.2",
+    "python312Packages.lxml@5.1.0",
+    "python312Packages.pymongo@4.6.3",
+    "python312Packages.python-dotenv@1.0.1",
+    "python312Packages.requests@2.31.0",
+    "python312Packages.aiohttp@3.9.5"
+  ],
+  "shell": {
+    "init_hook": [
+      ". $VENV_DIR/bin/activate"
+    ],
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
+    }
+  }
+}

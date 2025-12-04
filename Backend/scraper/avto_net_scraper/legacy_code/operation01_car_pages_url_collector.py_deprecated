@@ -1,0 +1,160 @@
+import os
+import random
+import re
+from typing import List
+
+from Backend.logger.log_config import log
+from Backend.scraper.avto_net_scraper.common.common_constants import CAR_PAGES_TXT
+from Backend.scraper.avto_net_scraper.models.BrandNumberUrl import BrandNumberUrl
+from Backend.scraper.avto_net_scraper.models.HrefNumberOfCars import HrefNumberOfCars
+from Backend.scraper.utils.dir_helper import save_file, read_file
+from Backend.scraper.utils.selenium_driverless_helpers import get_elements_with_xpath_async, solve_cloudflare_async
+
+# XPATHS
+BRAND_NUM_XPATH = "//a[@class = 'stretched-link font-weight-bold text-decoration-none text-truncate d-block']"
+YEAR_NUM_OF_CARS_XPATH = "//div[contains(@class, 'pt-2') and contains(@class, 'text-left') and normalize-space(text())='Letnik 1.registracije']/following-sibling::div[1]//a"
+BRAND_NUM_XPATH = "//a[@class = 'stretched-link font-weight-bold text-decoration-none text-truncate d-block']"
+YEAR_NUM_OF_CARS_XPATH = "//div[contains(@class, 'pt-2') and contains(@class, 'text-left') and normalize-space(text())='Letnik 1.registracije']/following-sibling::div[1]//a"
+
+# PATHS
+car_pages_txt = CAR_PAGES_TXT
+
+async def operation01_car_pages_url_collector(driver) -> List[str]:
+    save_to_cache = os.getenv("USE_TXT")
+    use_cache = os.getenv("USE_TXT")
+
+    if use_cache == 'True':
+        return read_file(car_pages_txt)
+    else:
+        all_brands_urls = await get_all_brands_urls(driver)
+        car_pages_url_list = await get_all_cars_pages_urls(driver, all_brands_urls)
+        car_pages_url_list = [clear_avto_net_url(url) for url in car_pages_url_list]
+
+        if save_to_cache == 'True':
+            save_file(car_pages_url_list, car_pages_txt)
+
+        return car_pages_url_list
+
+
+async def get_all_brands_urls(driver) -> list:
+    elements = await get_elements_with_xpath_async(driver,   )
+    list_of_brands_numbers_hrefs = []
+    for element in elements:
+        element_text = await element.text
+
+        brand_name = element_text[0:element_text.index("(")].strip()
+        number_of_cars = int(element_text[element_text.index("(") + 1:element_text.index(")")])
+        url = await element.get_attribute("href")
+
+        brand_number_href_obj = BrandNumberUrl(brand_name, number_of_cars, url)
+        list_of_brands_numbers_hrefs.append(brand_number_href_obj)
+    return list_of_brands_numbers_hrefs
+
+
+async def get_all_cars_pages_urls(driver, list_of_brands_numbers_hrefs: list) -> list:
+    all_pages_cars_links = []
+
+    tasks = [await collect_pages_for_brand(driver, brand_number_href_obj) for brand_number_href_obj in
+             list_of_brands_numbers_hrefs]
+
+    for link in tasks:
+        all_pages_cars_links.extend(link)
+
+    return all_pages_cars_links
+
+
+async def collect_pages_for_brand(driver, brand_number_href_obj):
+    number_of_cars = int(brand_number_href_obj.number)
+    href = brand_number_href_obj.href
+
+    if number_of_cars <= 840:
+        return await collect_all_pages_under_840_cars(driver, href, number_of_cars)
+    else:
+        return await collect_all_pages_over_840_cars(driver, href)
+
+
+async def collect_all_pages_under_840_cars(driver, car_brand_url, number_of_cars) -> list:
+    if number_of_cars <= 40:
+        return [car_brand_url]
+    else:
+        return await get_all_pages_links(driver, car_brand_url, number_of_cars)
+
+
+async def collect_all_pages_over_840_cars(driver, car_brand_url) -> list:
+    all_pages_links = []
+    href_num_of_cars_list = await get_year_num_of_cars_hrefs(driver, car_brand_url)
+    for href_num_of_cars_obj in href_num_of_cars_list:
+        link = href_num_of_cars_obj.href
+        number_of_cars = int(href_num_of_cars_obj.number_of_cars)
+        if number_of_cars <= 40:
+            all_pages_links.append(link)
+        else:
+            all_pages_links += await get_all_pages_links(driver, link, number_of_cars)
+    return all_pages_links
+
+
+async def get_year_num_of_cars_hrefs(driver, car_brand_url) -> list:
+    await visit_and_log_page(driver, car_brand_url)
+
+    elements = await get_elements_with_xpath_async(driver, YEAR_NUM_OF_CARS_XPATH)
+
+    subcategory_year_number = []
+
+    for element in elements:
+        hrefs = await element.get_attribute("href")
+        element_text_raw = await element.text
+
+        element_text = re.sub(r"\s+", " ", element_text_raw).strip()
+        if "novo" in element_text:
+            number_of_cars = element_text.split()[-1]
+        elif "1995 ali starejši" in element_text:
+            number_of_cars = element_text.replace("1995 ali starejši", "")
+        else:
+            number_of_cars = element_text[4:]
+
+        obj = HrefNumberOfCars(hrefs, number_of_cars)
+        subcategory_year_number.append(obj)
+
+    return subcategory_year_number
+
+
+async def get_all_pages_links(driver, base_brand_url, number_of_cars) -> list:
+    await visit_and_log_page(driver, base_brand_url)
+
+    url = await driver.current_url
+    all_pages_links = []
+    number_of_pages = number_of_cars // 40
+
+    url = url.replace("&cenaMin=0", "&cenaMin=100")
+    for page_counter in range(1, number_of_pages + 1):
+        if "stran=1" in url:
+            page_url = url.replace("stran=1", f"stran={page_counter}")
+        elif "stran=" in url:
+            page_url = url.replace("stran=", f"stran={page_counter}")
+
+        all_pages_links.append(page_url)
+    return all_pages_links
+
+
+async def visit_and_log_page(driver, url):
+    log.info(f"Visiting page: {url}")
+    await solve_cloudflare_async(driver)
+    await driver.get(url)
+def clear_avto_net_url(url):
+    params_to_remove = [
+        'model', 'modelID', 'tip', 'znamka2', 'model2', 'tip2', 'znamka3', 'model3', 'tip3',
+        'cenaMax', 'letnikMin', 'letnikMax', 'bencin', 'starost2', 'oblika', 'ccmMin', 'ccmMax',
+        'mocMin', 'mocMax', 'kmMin', 'kmMax', 'kwMin', 'kwMax', 'motortakt', 'motorvalji',
+        'lokacija', 'sirina', 'dolzina', 'dolzinaMIN', 'dolzinaMAX', 'nosilnostMIN', 'nosilnostMAX',
+        'lezisc', 'presek', 'premer', 'col', 'vijakov', 'EToznaka', 'vozilo', 'airbag', 'barva',
+        'barvaint', 'doseg', 'EQ1', 'EQ2', 'EQ3', 'EQ4', 'EQ5', 'EQ6', 'EQ8', 'EQ9', 'PIA',
+        'PIAzero', 'PIAOut', 'PSLO', 'akcija', 'paketgarancije', 'broker', 'prikazkategorije',
+        'kategorija', 'ONLvid', 'ONLnak', 'zaloga', 'arhiv', 'presort', 'tipsort'
+    ]
+    all_params_in_url_original = url.split("&")
+    all_params_in_url = all_params_in_url_original.copy()
+
+    for param in all_params_in_url_original:
+        if param.split("=")[0] in params_to_remove:
+            all_params_in_url.remove(param)
+    return "&".join(all_params_in_url)

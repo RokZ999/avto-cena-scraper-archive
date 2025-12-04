@@ -1,0 +1,55 @@
+import os
+from typing import List
+
+from selenium_driverless import webdriver
+from selenium_driverless.types.by import By
+
+from Backend.logger.log_config import log
+from Backend.scraper.avto_net_scraper.common.common_config import get_options_driver
+from Backend.scraper.avto_net_scraper.common.common_constants import BASE_URL, SEARCH_MAKES
+from Backend.scraper.avto_net_scraper.operation01_car_pages_url_collector import operation01_car_pages_url_collector
+from Backend.scraper.avto_net_scraper.operation01_car_pages_url_collector_v2 import \
+    operation01_car_pages_url_collector_v2
+from Backend.scraper.avto_net_scraper.operation02_car_direct_urls_collector_v2 import \
+    operation02_car_direct_urls_collector_v2
+from Backend.scraper.avto_net_scraper.operation03_car_direct_urls_processor_v2 import \
+    operation03_car_direct_urls_processor_v2
+from Backend.scraper.avto_net_scraper.operation04_car_data_extractor import operation04_car_data_extractor
+from Backend.scraper.avto_net_scraper.operation05_save_data_db import operation05_save_data_db
+from Backend.scraper.utils.selenium_driverless_helpers import solve_cloudflare_async
+
+# XPATHS
+OK_BUTTON_XPATH = "//*[text()='OK']"
+
+
+@time_it
+def avto_net_scraper():
+    production()
+
+
+async def init_driver(driver: webdriver.Chrome) -> None:
+    await driver.get(BASE_URL + SEARCH_MAKES)
+    await solve_cloudflare_async(driver)
+    element = await driver.find_element(By.XPATH, OK_BUTTON_XPATH)
+    await element.click()
+    log.info("Driver initialized on avto.net")
+
+
+async def async_production():
+    driver_options = os.getenv("DRIVER_OPTIONS")
+    async with webdriver.Chrome(options=get_options_driver(driver_options), debug=True) as driver:
+        await init_driver(driver)
+        car_pages_url_list = await operation01_car_pages_url_collector(driver)
+        return car_pages_url_list
+
+
+def sync_production():
+    car_pages_url_list: List[str] = operation01_car_pages_url_collector_v2()
+    car_direct_url_list = operation02_car_direct_urls_collector_v2(car_pages_url_list)
+    operation03_car_direct_urls_processor_v2(car_direct_url_list)
+    all_extract_car_data_dict = operation04_car_data_extractor()
+    operation05_save_data_db(all_extract_car_data_dict)
+
+
+def production():
+    sync_production()

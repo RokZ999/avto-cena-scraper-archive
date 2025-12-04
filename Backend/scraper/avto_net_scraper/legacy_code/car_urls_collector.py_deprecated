@@ -1,0 +1,39 @@
+from typing import List
+
+from Backend.logger.log_config import log
+from Backend.scraper.avto_net_scraper.common.common_constants import BASE_URL
+from Backend.scraper.utils.async_processor import collect_any_raw_htmls
+from Backend.scraper.utils.decorators import time_it
+from Backend.scraper.utils.dir_helper import remove_dir_if_exists_and_create
+from Backend.scraper.utils.lxml_processor import get_files_paths_from_directory, extract_direct_links
+
+# XPATHS
+CARS_XPATH = "//a[@class='stretched-link']"
+# SYSTEM PATHS
+RAW_HTMLS_DIR = "scraper/avto_net_scraper/temp/all_car_direct_urls"
+# CONSTANTS
+NUM_OF_WINDOWS = 12
+
+
+async def car_urls_collector(async_driver, car_pages_urls) -> List[str]:
+    remove_dir_if_exists_and_create(RAW_HTMLS_DIR)
+    await car_urls_collector_async(async_driver, car_pages_urls)
+    log.info("Done collecting car URLs.")
+    un_modified_urls = get_all_direct_links_to_cars_from_downloaded_htmls()
+    processed_urls = [extract_url(url).replace("..", BASE_URL) for url in un_modified_urls]
+    return processed_urls
+
+
+def extract_url(url):
+    first_occurrence = url.find('&display')
+    return url[:first_occurrence]
+
+
+async def car_urls_collector_async(async_driver, car_pages_urls) -> List[str]:
+    await collect_any_raw_htmls(async_driver, car_pages_urls, NUM_OF_WINDOWS, RAW_HTMLS_DIR)
+
+
+def get_all_direct_links_to_cars_from_downloaded_htmls() -> List[str]:
+    files_paths = get_files_paths_from_directory(RAW_HTMLS_DIR)
+    hrefs = extract_direct_links(files_paths, CARS_XPATH)
+    return hrefs
